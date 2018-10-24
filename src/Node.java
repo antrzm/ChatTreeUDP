@@ -1,26 +1,38 @@
-import java.awt.*;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.nio.ByteBuffer;
+import java.net.UnknownHostException;
+import java.util.Scanner;
 
-/*This thread has Node params */
+/*This thread has Node params such as name, port, parentIP&port*/
+/*Thread sends hello msg to parent and other messages to parent and child (if exist)*/
+/*PROTOCOL:
+ * type:      cmd:   hash:   data:
+ * hello msg     0   data    IP & port
+ * ACK           1   data    hash of client
+ * regular msg   2   data    text
+ * bb msg        3   data    IP & port
+ * */
 
 class Node extends Thread {
-    private String name;
+    private static final int CMD_HELLO = 0;
+    private static final int CMD_REG = 2;
     private int loose = 0;
     private int port;
     private String parentIP = null;
     private int parentPort = -1;
     private DatagramSocket socket;
-    private Receiver receiver;
-
+    private String myAddress;
 
     Node(String name, int loose, int port) {
-        this.name  = name;
         this.loose = loose;
-        this.port  = port;
+        this.port = port;
+        try {
+            myAddress = InetAddress.getLocalHost().getHostAddress();
+        } catch (UnknownHostException e) {
+            e.printStackTrace();
+        }
     }
 
     void setParentIP(String IP) {
@@ -34,23 +46,27 @@ class Node extends Thread {
     public void run() {
         try {
             socket = new DatagramSocket();
-            if (parentIP != null)
-                sendHello();
-            receiver = new Receiver(port);
+            Receiver receiver = new Receiver(loose, myAddress, port, parentIP, parentPort);
             receiver.start();
-            //TODO: send
+            if (parentIP != null) sendHello();
+            Scanner scanner = new Scanner(System.in);
+            while (true) {
+                String text = scanner.nextLine();
+                if (!text.isEmpty()) {
+                    MyPackage myPack = new MyPackage(CMD_REG, text, myAddress, port);
+                    if (parentPort != -1) receiver.sendToParent(myPack);
+                    receiver.sendToChildren(myPack, null, -1);
+                }
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
     private void sendHello() throws IOException {
-        String str = "hello from " + name;
-        byte[] helloMsg = str.getBytes();
-        byte[] dataLen = ByteBuffer.allocate(Integer.BYTES).putInt(helloMsg.length).array();
-        ByteBuffer bb = ByteBuffer.allocate(helloMsg.length + dataLen.length).put(dataLen).put(helloMsg);
-        InetAddress address = InetAddress.getByName(parentIP);
-        DatagramPacket packet = new DatagramPacket(bb.array(), helloMsg.length + dataLen.length, address, parentPort);
+        String text = "Hello from " + myAddress + ' ' + Integer.toString(port);
+        MyPackage myPack = new MyPackage(CMD_HELLO, text, myAddress, port);
+        DatagramPacket packet = myPack.generateDatagramPacket(parentIP, parentPort);
         socket.send(packet);
     }
 }

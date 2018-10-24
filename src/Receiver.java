@@ -1,91 +1,179 @@
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.SocketException;
+import java.net.*;
 import java.nio.ByteBuffer;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 
 
 /*This thread receives message and sends them to child node (if exists) and to parent node (if exists)*/
 /*Message is either received or ignored based depending on loose percent and random number generated  */
 /*When msg is received ACK-package is sent back*/
 /*PROTOCOL:
-* type:      cmd:   hash:   data:
-* hello msg     0   data    IP & port
-* ACK           1   data    hash of client
-* regular msg   2   data    text
-* bb msg        3   data    IP & port
-* */
+ * type:      cmd:   hash:   data:
+ * hello msg     0   data    IP & port
+ * ACK           1   data    hash of client
+ * regular msg   2   data    length + text
+ * bb msg        3   data    IP & port
+ * */
 
 public class Receiver extends Thread {
+    private static final int CMD_HELLO = 0;
+    private static final int CMD_ACK = 1;
+    private static final int CMD_REG = 2;
     private static final int PACK_SIZE = 2048;
     private byte data[] = new byte[PACK_SIZE];
     private DatagramPacket packet;
     private DatagramSocket socket;
-    private HashMap<InetAddress, Integer> kidsAddrs;
+    private Map<String, Integer> kidsAddrs;
     private int loose;
+    private String myIP;
+    private int myPort;
+    private String parentIP;
+    private int parentPort;
+    private Map<Integer, MyPackage> messages;
+
+    private Thread ACKThread;
 
 
-    Receiver(int port, int loose) throws SocketException {
+    Receiver(int loose, String IP, int port, String parentIP, int parentPort) throws SocketException {
         packet = new DatagramPacket(data, PACK_SIZE);
         socket = new DatagramSocket(port);
+        myIP = IP;
+        myPort = port;
         this.loose = loose;
+        this.parentIP = parentIP;
+        this.parentPort = parentPort;
+        kidsAddrs = new HashMap<>();
+        messages = new HashMap<>();
     }
 
     public void run() {
-        //TODO: use loose percent
         Random random = new Random(System.currentTimeMillis());
-        InetAddress newChildAddr;
+        Thread ACKThread = new Thread() {
+            public void run() {
+                try {
+                    sleep(3000);
+                    if (!messages.isEmpty())
+                        for (Object obj : messages.entrySet()) {
+                            Map.Entry pair = (Map.Entry) obj;
+                            MyPackage pack = (MyPackage) pair.getValue();
+                            sendMsg(String.valueOf(pack.packet.getAddress()), pack.packet.getPort(), pack);
+                        }
+                } catch (InterruptedException | IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        };
+        ACKThread.start();
         while (true) {
             try {
                 socket.receive(packet);
                 int rndNum = random.nextInt(100 + 1);
-                if (loose < rndNum){
-                    //TODO: ignore msg
-                }
-                else {
-                    ByteBuffer bb = ByteBuffer.wrap(data, 0, Integer.BYTES);
-                    int sz = bb.getInt();
+                if (loose > rndNum) {                           //imitating message lost
                     if (data.length != 0) {
-                        String str = new String(data, Integer.BYTES, sz);
-                        System.out.println(str);
-                        if (new String(data, Integer.BYTES, 10).equals("hello from")) {     //
-                            kidsAddrs.put(packet.getAddress(), packet.getPort());
-                        } else {
-                            //TODO:
-                            //if has parent
-                            //sendToParent();
-                            if (kidsAddrs.size() > 1)
-                                sendToChildren(packet.getAddress(), packet.getPort(), str);
+                        int offset = 0;
+                        ByteBuffer bb = ByteBuffer.wrap(data);
+                        int cmd = bb.getInt();
+                        offset += Integer.BYTES;
+
+                        int hash = bb.getInt();
+                        offset += Integer.BYTES;
+
+                        int IPsz = bb.getInt();
+                        offset += Integer.BYTES;
+
+                        ByteArrayInputStream bais = new ByteArrayInputStream(data, offset, IPsz);
+                        byte[] IPbytes = new byte[IPsz];
+                        bais.read(IPbytes, 0, IPsz);
+                        String IP = new String(IPbytes);
+                        offset += IPsz;
+                        System.out.println("IP is " + IP);
+
+                        bb = ByteBuffer.wrap(data, offset, Integer.BYTES);
+                        int port = bb.getInt();
+                        offset += Integer.BYTES;
+                        System.out.println("port is " + port);
+
+                        bb = ByteBuffer.wrap(data, offset, Integer.BYTES);
+                        int msgLenSize = bb.getInt();
+                        offset += Integer.BYTES;
+
+                        bais = new ByteArrayInputStream(data, offset, msgLenSize);
+                        byte[] msgBytes = new byte[msgLenSize];
+                        bais.read(msgBytes, 0, msgLenSize);
+                        String msg = new String(msgBytes);
+                        System.out.println(msg);
+
+                        switch (cmd) {
+                            case CMD_HELLO: {
+                                if (!isChild(IP, port)) addChild(IP, port);
+                                MyPackage ACKpack = new MyPackage(CMD_ACK, String.valueOf(hash), myIP, myPort);
+                                sendMsg(IP, port, ACKpack);
+                            }
+                            case CMD_ACK: {
+                                messages.remove(hash);
+                            }
+                            case CMD_REG: {
+                                if (isChild(IP, port) || isParent(IP, port)) {
+                                    MyPackage ACKpack = new MyPackage(CMD_ACK, String.valueOf(hash), myIP, myPort);
+                                    sendMsg(IP, port, ACKpack);
+                                    MyPackage pack = new MyPackage(CMD_REG, msg, myIP, myPort);
+                                    if (!isParent(IP, port)) sendToParent(pack);
+                                    sendToChildren(pack, IP, port);
+                                }
+                            }
                         }
-                        sendMsg(packet.getAddress(), packet.getPort(), "ACK");          //sending ACK
                     }
                 }
+            } catch (SocketTimeoutException e) {
+                e.printStackTrace();
+                removeChild(String.valueOf(packet.getAddress()), packet.getPort());
+                System.exit(-1);
             } catch (IOException e) {
                 e.printStackTrace();
+                System.exit(-1);
             }
         }
     }
 
-    void sendMsg(InetAddress addr, int port, String str) throws IOException {
-        DatagramSocket sendSocket = new DatagramSocket();
-        byte[] helloMsg = str.getBytes();
-        byte[] dataLen = ByteBuffer.allocate(Integer.BYTES).putInt(helloMsg.length).array();
-        ByteBuffer bb = ByteBuffer.allocate(helloMsg.length + dataLen.length).put(dataLen).put(helloMsg);
-        DatagramPacket packet = new DatagramPacket(bb.array(), helloMsg.length + dataLen.length, addr, port);
-        sendSocket.send(packet);
+    private boolean isParent(String ip, int port) {
+        return ip.equals(parentIP) && port == parentPort;
     }
 
-    private void sendToChildren(InetAddress self, int port, String msg) throws IOException {
-        Iterator it = kidsAddrs.entrySet().iterator();
-        while (it.hasNext()){
-            Map.Entry pair = (Map.Entry)it.next();
-            if (pair.getKey() != self)
-                sendMsg((InetAddress) pair.getKey(), (Integer)pair.getValue(), msg);
+    void sendToParent(MyPackage pack) throws IOException {
+        sendMsg(parentIP, parentPort, pack);
+    }
+
+    private void sendMsg(String IP, int port, MyPackage pack) throws IOException {
+        DatagramPacket packet = pack.generateDatagramPacket(IP, port);
+        socket.send(packet);
+        messages.put(pack.hash, pack);
+    }
+
+    void sendToChildren(MyPackage pack, String selfIP, int selfPort) throws IOException {
+        for (Object obj : kidsAddrs.entrySet()) {
+            Map.Entry pair = (Map.Entry) obj;
+            if (selfPort == -1) {
+                sendMsg((String) pair.getKey(), (Integer) pair.getValue(), pack);
+            } else if (!pair.getKey().equals(selfIP) && pair.getValue() != Integer.valueOf(selfPort))
+                sendMsg((String) pair.getKey(), (Integer) pair.getValue(), pack);
         }
+    }
+
+    private boolean isChild(String IP, int port) {
+        for (Object o : kidsAddrs.entrySet()) {
+            Map.Entry pair = (Map.Entry) o;
+            if (pair.getKey() == IP && pair.getValue() == Integer.valueOf(port))
+                return true;
+        }
+        return false;
+    }
+
+    private void addChild(String IP, int port) {
+        kidsAddrs.put(IP, port);
+    }
+
+    private void removeChild(String IP, int port) {
+        kidsAddrs.remove(IP, port);
     }
 }
