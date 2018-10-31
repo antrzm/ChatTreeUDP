@@ -12,14 +12,15 @@ import java.util.UUID;
  * bb msg        3   data    length + IP & port */
 
 class MyPackage {
-    private int cmd;
+    int cmd;
     int hash;
-    private String data;
+    String data;
     private ByteBuffer buf;
     private int bufLen;
     private String myAddress;
     private int myPort;
-    DatagramPacket packet;
+    int portToSend;
+    String IPtoSend;
 
     MyPackage(int cmd, String data, String myAddress, int myPort) {
         this.cmd = cmd;
@@ -45,9 +46,10 @@ class MyPackage {
     }
 
     DatagramPacket generateDatagramPacket(String IP, int port) throws UnknownHostException {
+        this.portToSend = port;
+        this.IPtoSend = IP;
         genPackage();
-        InetAddress address = InetAddress.getByName(IP);
-        this.packet = new DatagramPacket(buf.array(), bufLen, address, port);
-        return this.packet;
+        InetAddress address = InetAddress.getByName(IPtoSend);
+        return new DatagramPacket(buf.array(), bufLen, address, portToSend);
     }
 }
