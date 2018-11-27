@@ -1,9 +1,9 @@
 <application>
   <component name="FindSettings">
-    <option name="customScope" value="File '...\src\Client.java [HTTP client-server]'" />
-    <option name="defaultScopeName" value="File '...\src\Client.java [HTTP client-server]'" />
+    <option name="customScope" value="Project and Libraries" />
+    <option name="defaultScopeName" value="Project and Libraries" />
     <option name="localWholeWordsOnly" value="true" />
     <option name="LOCAL_WHOLE_WORDS_ONLY" value="true" />
-    <option name="SEARCH_SCOPE" value="File '...\src\Client.java [HTTP client-server]'" />
+    <option name="SEARCH_SCOPE" value="Project and Libraries" />
   </component>
 </application>
