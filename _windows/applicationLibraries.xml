@@ -1,8 +1,8 @@
 <application>
   <component name="libraryTable">
-    <library name="Jama-1.0.3">
+    <library name="Jama">
       <CLASSES>
-        <root url="jar://$USER_HOME$/Downloads/graphics-master/graphics-master/RayTracing/Jama-1.0.3.jar!/" />
+        <root url="jar://$USER_HOME$/Downloads/graphics-master/graphics-master/RayTracing/library/Jama-1.0.3.jar!/Jama" />
       </CLASSES>
       <JAVADOC />
       <SOURCES />
