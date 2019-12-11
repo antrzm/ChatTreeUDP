@@ -4,6 +4,7 @@
     <extensionMap>
       <mapping pattern="reservations" type="HTML" />
       <mapping pattern="file" type="PLAIN_TEXT" />
+      <mapping ext="bc" type="PLAIN_TEXT" />
       <mapping ext="render" type="PLAIN_TEXT" />
     </extensionMap>
   </component>
